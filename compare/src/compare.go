@@ -13,15 +13,15 @@ import (
 	"strings"
 )
 
-const contrastThreshold = 0.9
-const quadThreshold = 0.9
+const contrastThreshold = 0.25
+const quadThreshold = 0.5
 
 type comparisonType string
 
 const (
 	Pixel    comparisonType = "pixel"
-	Contrast                = "contrast"
-	Quad                    = "quad"
+	Contrast comparisonType = "contrast"
+	Quad     comparisonType = "quad"
 )
 
 type CompareData struct {
@@ -44,7 +44,8 @@ type ResultData struct {
 }
 
 func getGrayValue(r uint32, g uint32, b uint32) float64 {
-	return 0.2125*float64(r) + 0.7154*float64(g) + 0.0721*float64(b)
+	gray := 0.2125*float64(r) + 0.7154*float64(g) + 0.0721*float64(b)
+	return gray / float64(0xffff)
 }
 
 func copy(src string, dst string) error {
@@ -66,13 +67,16 @@ func export(data CompareData, img image.Image, result ResultData) error {
 		return err
 	}
 
+	dest := filepath.Join(data.ExportDest, result.Comparison)
+	os.Mkdir(dest, os.ModePerm)
+
 	base := filepath.Base(data.SourceA)
 	ext := filepath.Ext(base)
 	filename := strings.TrimSuffix(base, ext)
 
 	filename += "_diff.png"
 
-	f, err := os.Create(filepath.Join(data.ExportDest, filename))
+	f, err := os.Create(filepath.Join(dest, filename))
 	if err != nil {
 		return err
 	}
@@ -82,8 +86,8 @@ func export(data CompareData, img image.Image, result ResultData) error {
 		return err
 	}
 
-	copy(data.SourceA, filepath.Join(data.ExportDest, filepath.Base(data.SourceA)))
-	copy(data.SourceA, filepath.Join(data.ExportDest, filepath.Base(data.SourceB)))
+	copy(data.SourceA, filepath.Join(dest, filepath.Base(data.SourceA)))
+	copy(data.SourceB, filepath.Join(dest, filepath.Base(data.SourceB)))
 
 	jsonData, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
@@ -91,7 +95,7 @@ func export(data CompareData, img image.Image, result ResultData) error {
 		return err
 	}
 
-	err = os.WriteFile("meta.json", jsonData, 0644)
+	err = os.WriteFile(filepath.Join(dest, "meta.json"), jsonData, 0644)
 	if err != nil {
 		err = errors.New(fmt.Sprintln("Error writing to file:", err))
 		return err
@@ -101,6 +105,10 @@ func export(data CompareData, img image.Image, result ResultData) error {
 }
 
 func Compare(set CompareSet) error {
+	if len(set.Data.Comparisons) == 0 {
+		return errors.New(fmt.Sprintln("No comparison type set."))
+	}
+
 	for _, c := range set.Data.Comparisons {
 		var frac float64
 		var img image.Image
@@ -121,10 +129,10 @@ func Compare(set CompareSet) error {
 			}
 			result = ResultData{"Quad", frac}
 		default:
-			return errors.New(fmt.Sprintln("Comparison type \"%v\" not supported.", c))
+			return errors.New(fmt.Sprintf("Comparison type \"%v\" not supported.\n", c))
 		}
 
-		fmt.Println("%s comparison: %f", result.Comparison, result.Fraction)
+		fmt.Printf("%s comparison: %f\n", result.Comparison, result.Fraction)
 
 		if len(set.Data.ExportDest) > 0 {
 			if err := export(set.Data, img, result); err != nil {
@@ -141,7 +149,7 @@ func PixelCompare(set CompareSet) (float64, image.Image) {
 	w, h := bounds.Max.X, bounds.Max.Y
 
 	numFailed := 0
-	result := image.NewGray(bounds)
+	result := image.NewNRGBA(bounds)
 
 	for x := 0; x < w; x++ {
 		for y := 0; y < h; y++ {
@@ -164,7 +172,7 @@ func ConstrastCompare(set CompareSet) (float64, image.Image) {
 	w, h := bounds.Max.X, bounds.Max.Y
 
 	numFailed := 0
-	result := image.NewGray(bounds)
+	result := image.NewNRGBA(bounds)
 
 	for x := 0; x < w; x++ {
 		for y := 0; y < h; y++ {
@@ -174,9 +182,10 @@ func ConstrastCompare(set CompareSet) (float64, image.Image) {
 			r, g, b, _ = set.ImageB.At(x, y).RGBA()
 			grayB := getGrayValue(r, g, b)
 
-			if math.Abs(grayA-grayB) < contrastThreshold {
+			if math.Abs(grayA-grayB) > contrastThreshold {
 				numFailed++
-				result.Set(x, y, color.White)
+				c := color.Gray16{uint16(0xffff * math.Abs(grayA-grayB))}
+				result.Set(x, y, c)
 			} else {
 				result.Set(x, y, color.Black)
 			}
@@ -193,12 +202,12 @@ func QuadCompare(set CompareSet) (float64, image.Image, error) {
 	w, h := bounds.Max.X, bounds.Max.Y
 
 	if w%2 != 0 || h%2 != 0 {
-		err := errors.New(fmt.Sprintln("Quad comparison requires power of two resolution. Resolution: %d x %d", w, h))
+		err := errors.New(fmt.Sprintf("Quad comparison requires power of two resolution. Resolution: %d x %d\n", w, h))
 		return 0.0, nil, err
 	}
 
 	numFailed := 0
-	result := image.NewGray(bounds)
+	result := image.NewNRGBA(bounds)
 
 	for x := 0; x < w; x += 2 {
 		for y := 0; y < h; y += 2 {
@@ -227,16 +236,23 @@ func QuadCompare(set CompareSet) (float64, image.Image, error) {
 			avgGrayA /= 4.0
 			avgGrayB /= 4.0
 
-			if math.Abs(avgGrayA-avgGrayB) < quadThreshold {
+			if math.Abs(avgGrayA-avgGrayB) > quadThreshold {
 				numFailed++
-				result.Set(x, y, color.White)
+				c := color.Gray16{uint16(0xffff * math.Abs(avgGrayA-avgGrayB))}
+				result.Set(x, y, c)
+				result.Set(x+1, y, c)
+				result.Set(x, y+1, c)
+				result.Set(x+1, y+1, c)
 			} else {
 				result.Set(x, y, color.Black)
+				result.Set(x+1, y, color.Black)
+				result.Set(x, y+1, color.Black)
+				result.Set(x+1, y+1, color.Black)
 			}
 
 		}
 	}
 
-	fraction := float64(numFailed) / float64(w*h)
+	fraction := float64(numFailed) / float64(w*h/4)
 	return fraction, result, nil
 }

@@ -35,7 +35,7 @@ func validateArgs() (CompareData, error) {
 	data.ExportDest = *o
 
 	cOptions := strings.Split(*c, ",")
-	if len(cOptions) == 0 {
+	if len(cOptions) <= 1 {
 		data.Comparisons = []comparisonType{Pixel, Contrast, Quad}
 	} else {
 		for _, cO := range cOptions {
@@ -84,7 +84,7 @@ func load(data CompareData) ([]CompareSet, error) {
 			return sets, err
 		}
 
-		sets = []CompareSet{CompareSet{data, imgA, imgB}}
+		sets = []CompareSet{{data, imgA, imgB}}
 	}
 
 	return sets, nil
@@ -108,7 +108,7 @@ func main() {
 	}
 
 	for _, s := range compareSets {
-		err = Compare(compareData, s)
+		err = Compare(s)
 		if err != nil {
 			log.Fatal(err)
 		}
