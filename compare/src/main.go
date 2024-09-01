@@ -10,13 +10,17 @@ import (
 	"strings"
 )
 
-func validateArgs() (CompareData, error) {
-	pathA := flag.String("A", "", "Filepath/directory A")
-	pathB := flag.String("B", "", "Filepath/directory B")
-	c := flag.String("c", "", "Optional: Comparison options, [pixel,contrast,quad] Default: all")
-	o := flag.String("o", "", "Optional: output directory")
+func validateArgs(args []string) (CompareData, error) {
+	fs := flag.NewFlagSet("image-compare", flag.ContinueOnError)
 
-	flag.Parse()
+	pathA := fs.String("A", "", "Filepath/directory A")
+	pathB := fs.String("B", "", "Filepath/directory B")
+	c := fs.String("c", "", "Optional: Comparison options, [pixel,contrast,quad] Default: all")
+	o := fs.String("o", "", "Optional: output directory")
+
+	if err := fs.Parse(args); err != nil {
+		return CompareData{}, err
+	}
 
 	infoA, errA := os.Stat(*pathA)
 	infoB, errB := os.Stat(*pathB)
@@ -35,7 +39,7 @@ func validateArgs() (CompareData, error) {
 	data.ExportDest = *o
 
 	cOptions := strings.Split(*c, ",")
-	if len(cOptions) <= 1 {
+	if len(cOptions) == 0 || cOptions[0] == "" {
 		data.Comparisons = []comparisonType{Pixel, Contrast, Quad}
 	} else {
 		for _, cO := range cOptions {
@@ -90,27 +94,37 @@ func load(data CompareData) ([]CompareSet, error) {
 	return sets, nil
 }
 
-func main() {
-	compareData, err := validateArgs()
+func run(args []string) []ResultData {
+	compareData, err := validateArgs(args)
 	if err != nil {
 		log.Fatal(err)
-		return
+		return []ResultData{}
 	}
 
 	compareSets, err := load(compareData)
 	if err != nil {
 		log.Fatal(err)
-		return
+		return []ResultData{}
 	}
 
 	if len(compareSets) == 0 {
 		log.Println("Zero valid comparisons loaded")
+		return []ResultData{}
 	}
 
+	results := []ResultData{}
 	for _, s := range compareSets {
-		err = Compare(s)
+		r, err := Compare(s)
 		if err != nil {
 			log.Fatal(err)
 		}
+
+		results = append(results, r...)
 	}
+
+	return results
+}
+
+func main() {
+	run(os.Args[1:])
 }

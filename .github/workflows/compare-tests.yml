@@ -1,0 +1,34 @@
+name: Compare Tests
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: '1.21'
+
+    - name: Cache Go modules
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/go/pkg/mod
+          ~/go/bin
+        key: ${{ runner.os }}-go-${{ hashFiles('compare/**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Install dependencies
+      working-directory: compare
+      run: go mod download
+
+    - name: Run tests
+      working-directory: compare
+      run: go test -v ./...

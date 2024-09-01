@@ -104,11 +104,12 @@ func export(data CompareData, img image.Image, result ResultData) error {
 	return nil
 }
 
-func Compare(set CompareSet) error {
+func Compare(set CompareSet) ([]ResultData, error) {
 	if len(set.Data.Comparisons) == 0 {
-		return errors.New(fmt.Sprintln("No comparison type set."))
+		return []ResultData{}, errors.New(fmt.Sprintln("No comparison type set."))
 	}
 
+	results := []ResultData{}
 	for _, c := range set.Data.Comparisons {
 		var frac float64
 		var img image.Image
@@ -125,23 +126,24 @@ func Compare(set CompareSet) error {
 		case Quad:
 			frac, img, err = QuadCompare(set)
 			if err != nil {
-				return err
+				return []ResultData{}, err
 			}
 			result = ResultData{"Quad", frac}
 		default:
-			return errors.New(fmt.Sprintf("Comparison type \"%v\" not supported.\n", c))
+			return []ResultData{}, errors.New(fmt.Sprintf("Comparison type \"%v\" not supported.\n", c))
 		}
 
 		fmt.Printf("%s comparison: %f\n", result.Comparison, result.Fraction)
+		results = append(results, result)
 
 		if len(set.Data.ExportDest) > 0 {
 			if err := export(set.Data, img, result); err != nil {
-				return err
+				return []ResultData{}, err
 			}
 		}
 	}
 
-	return nil
+	return results, nil
 }
 
 func PixelCompare(set CompareSet) (float64, image.Image) {
