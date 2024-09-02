@@ -1,22 +1,27 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
+	"ic/shared"
 	"image"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 )
+
+type Pair struct {
+	a, b interface{}
+}
 
 func validateArgs(args []string) (CompareData, error) {
 	fs := flag.NewFlagSet("image-compare", flag.ContinueOnError)
 
-	pathA := fs.String("A", "", "Filepath/directory A")
-	pathB := fs.String("B", "", "Filepath/directory B")
-	c := fs.String("c", "", "Optional: Comparison options, [pixel,contrast,quad] Default: all")
-	o := fs.String("o", "", "Optional: output directory")
+	pathA := fs.String("A", "", "Filepath/directory A.")
+	pathB := fs.String("B", "", "Filepath/directory B.")
+	c := fs.String("c", "all", "Optional: Comparison options, [pixel,contrast,quad].")
+	o := fs.String("o", "", "Optional: output directory.")
 
 	if err := fs.Parse(args); err != nil {
 		return CompareData{}, err
@@ -25,11 +30,11 @@ func validateArgs(args []string) (CompareData, error) {
 	infoA, errA := os.Stat(*pathA)
 	infoB, errB := os.Stat(*pathB)
 	if errA != nil || errB != nil {
-		return CompareData{}, errors.New(fmt.Sprintln("No sources provided."))
+		return CompareData{}, fmt.Errorf("no sources provided")
 	}
 
 	if (infoA.IsDir() && !infoB.IsDir()) || (!infoA.IsDir() && infoB.IsDir()) {
-		return CompareData{}, errors.New(fmt.Sprintln("Sources differ, comparing file to directory."))
+		return CompareData{}, fmt.Errorf("sources differ, comparing file to directory")
 	}
 
 	data := CompareData{}
@@ -37,22 +42,7 @@ func validateArgs(args []string) (CompareData, error) {
 	data.SourceB = *pathB
 	data.IsDir = infoA.IsDir()
 	data.ExportDest = *o
-
-	cOptions := strings.Split(*c, ",")
-	if len(cOptions) == 0 || cOptions[0] == "" {
-		data.Comparisons = []comparisonType{Pixel, Contrast, Quad}
-	} else {
-		for _, cO := range cOptions {
-			switch comparisonType(cO) {
-			case Pixel:
-				data.Comparisons = append(data.Comparisons, Pixel)
-			case Contrast:
-				data.Comparisons = append(data.Comparisons, Contrast)
-			case Quad:
-				data.Comparisons = append(data.Comparisons, Quad)
-			}
-		}
-	}
+	data.Comparisons = shared.GetComparisons(*c)
 
 	return data, nil
 }
@@ -73,46 +63,75 @@ func loadImage(path string) (image.Image, error) {
 }
 
 func load(data CompareData) ([]CompareSet, error) {
+	pairs := []Pair{}
 	sets := []CompareSet{}
 
+	orgExportDest := data.ExportDest
+
 	if data.IsDir {
-		return sets, errors.New(fmt.Sprintln("Directory load not supported"))
+		itemsA, _ := os.ReadDir(data.SourceA)
+		itemsB, _ := os.ReadDir(data.SourceB)
+		for _, iA := range itemsA {
+			if !iA.IsDir() {
+				for _, iB := range itemsB {
+					if !iA.IsDir() {
+						if iA.Name() == iB.Name() {
+							pairs = append(pairs, Pair{data.SourceA + "/" + iA.Name(), data.SourceB + "/" + iB.Name()})
+						}
+					}
+				}
+			}
+		}
 	} else {
-		imgA, err := loadImage(data.SourceA)
+		pairs = append(pairs, Pair{data.SourceA, data.SourceB})
+	}
+
+	for _, p := range pairs {
+		imgA, err := loadImage(p.a.(string))
 		if err != nil {
 			return sets, err
 		}
 
-		imgB, err := loadImage(data.SourceB)
+		imgB, err := loadImage(p.b.(string))
 		if err != nil {
 			return sets, err
 		}
 
-		sets = []CompareSet{{data, imgA, imgB}}
+		data.SourceA = p.a.(string)
+		data.SourceB = p.b.(string)
+
+		if len(orgExportDest) > 1 {
+
+			base := filepath.Base(p.a.(string))
+			ext := filepath.Ext(base)
+			dir := filepath.Join(orgExportDest, strings.TrimSuffix(base, ext))
+			os.Mkdir(dir, os.ModePerm)
+
+			data.ExportDest = dir
+		}
+
+		sets = append(sets, CompareSet{data, imgA, imgB})
 	}
 
 	return sets, nil
 }
 
-func run(args []string) []ResultData {
+func run(args []string) []shared.ResultData {
 	compareData, err := validateArgs(args)
 	if err != nil {
 		log.Fatal(err)
-		return []ResultData{}
 	}
 
 	compareSets, err := load(compareData)
 	if err != nil {
 		log.Fatal(err)
-		return []ResultData{}
 	}
 
 	if len(compareSets) == 0 {
-		log.Println("Zero valid comparisons loaded")
-		return []ResultData{}
+		log.Fatal("Zero valid comparisons loaded")
 	}
 
-	results := []ResultData{}
+	results := []shared.ResultData{}
 	for _, s := range compareSets {
 		r, err := Compare(s)
 		if err != nil {
@@ -126,5 +145,8 @@ func run(args []string) []ResultData {
 }
 
 func main() {
-	run(os.Args[1:])
+	results := run(os.Args[1:])
+	for _, r := range results {
+		fmt.Println(r.Location)
+	}
 }

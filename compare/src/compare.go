@@ -2,8 +2,8 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
+	"ic/shared"
 	"image"
 	"image/color"
 	"image/png"
@@ -15,20 +15,13 @@ import (
 
 const contrastThreshold = 0.25
 const quadThreshold = 0.5
-
-type comparisonType string
-
-const (
-	Pixel    comparisonType = "pixel"
-	Contrast comparisonType = "contrast"
-	Quad     comparisonType = "quad"
-)
+const debug = false
 
 type CompareData struct {
 	SourceA     string
 	SourceB     string
 	IsDir       bool
-	Comparisons []comparisonType
+	Comparisons []shared.ComparisonType
 	ExportDest  string
 }
 
@@ -36,11 +29,6 @@ type CompareSet struct {
 	Data   CompareData
 	ImageA image.Image
 	ImageB image.Image
-}
-
-type ResultData struct {
-	Comparison string  `json:"name"`
-	Fraction   float64 `json:"value"`
 }
 
 func getGrayValue(r uint32, g uint32, b uint32) float64 {
@@ -61,7 +49,7 @@ func copy(src string, dst string) error {
 	return nil
 }
 
-func export(data CompareData, img image.Image, result ResultData) error {
+func export(data CompareData, img image.Image, result shared.ResultData) error {
 	_, err := os.Stat(data.ExportDest)
 	if err != nil {
 		return err
@@ -91,54 +79,57 @@ func export(data CompareData, img image.Image, result ResultData) error {
 
 	jsonData, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
-		err = errors.New(fmt.Sprintln("Error marshaling JSON:", err))
+		err = fmt.Errorf("error marshaling json: %v", err)
 		return err
 	}
 
 	err = os.WriteFile(filepath.Join(dest, "meta.json"), jsonData, 0644)
 	if err != nil {
-		err = errors.New(fmt.Sprintln("Error writing to file:", err))
+		err = fmt.Errorf("error writing to file: %v", err)
 		return err
 	}
 
 	return nil
 }
 
-func Compare(set CompareSet) ([]ResultData, error) {
+func Compare(set CompareSet) ([]shared.ResultData, error) {
 	if len(set.Data.Comparisons) == 0 {
-		return []ResultData{}, errors.New(fmt.Sprintln("No comparison type set."))
+		return []shared.ResultData{}, fmt.Errorf("no comparison type set.")
 	}
 
-	results := []ResultData{}
+	results := []shared.ResultData{}
 	for _, c := range set.Data.Comparisons {
 		var frac float64
+		var numFailed int
 		var img image.Image
 		var err error
-		var result ResultData
+		var result shared.ResultData
 
 		switch c {
-		case Pixel:
-			frac, img = PixelCompare(set)
-			result = ResultData{"Pixel", frac}
-		case Contrast:
-			frac, img = ConstrastCompare(set)
-			result = ResultData{"Contrast", frac}
-		case Quad:
-			frac, img, err = QuadCompare(set)
+		case shared.Pixel:
+			frac, numFailed, img = PixelCompare(set)
+			result = shared.ResultData{string(shared.Pixel), frac, numFailed, set.Data.ExportDest}
+		case shared.Contrast:
+			frac, numFailed, img = ConstrastCompare(set)
+			result = shared.ResultData{string(shared.Contrast), frac, numFailed, set.Data.ExportDest}
+		case shared.Quad:
+			frac, numFailed, img, err = QuadCompare(set)
 			if err != nil {
-				return []ResultData{}, err
+				return []shared.ResultData{}, err
 			}
-			result = ResultData{"Quad", frac}
+			result = shared.ResultData{string(shared.Quad), frac, numFailed, set.Data.ExportDest}
 		default:
-			return []ResultData{}, errors.New(fmt.Sprintf("Comparison type \"%v\" not supported.\n", c))
+			return []shared.ResultData{}, fmt.Errorf("comparison type \"%v\" not supported", c)
 		}
 
-		fmt.Printf("%s comparison: %f\n", result.Comparison, result.Fraction)
+		if debug {
+			fmt.Printf("%s comparison: %f\n", result.Comparison, result.Fraction)
+		}
 		results = append(results, result)
 
 		if len(set.Data.ExportDest) > 0 {
 			if err := export(set.Data, img, result); err != nil {
-				return []ResultData{}, err
+				return []shared.ResultData{}, err
 			}
 		}
 	}
@@ -146,10 +137,11 @@ func Compare(set CompareSet) ([]ResultData, error) {
 	return results, nil
 }
 
-func PixelCompare(set CompareSet) (float64, image.Image) {
+func PixelCompare(set CompareSet) (float64, int, image.Image) {
 	bounds := set.ImageA.Bounds()
 	w, h := bounds.Max.X, bounds.Max.Y
 
+	numMatches := 0
 	numFailed := 0
 	result := image.NewNRGBA(bounds)
 
@@ -159,20 +151,22 @@ func PixelCompare(set CompareSet) (float64, image.Image) {
 				numFailed++
 				result.Set(x, y, color.White)
 			} else {
+				numMatches++
 				result.Set(x, y, color.Black)
 			}
 
 		}
 	}
 
-	fraction := float64(numFailed) / float64(w*h)
-	return fraction, result
+	fraction := float64(numMatches) / float64(w*h)
+	return fraction, numFailed, result
 }
 
-func ConstrastCompare(set CompareSet) (float64, image.Image) {
+func ConstrastCompare(set CompareSet) (float64, int, image.Image) {
 	bounds := set.ImageA.Bounds()
 	w, h := bounds.Max.X, bounds.Max.Y
 
+	numMatches := 0
 	numFailed := 0
 	result := image.NewNRGBA(bounds)
 
@@ -189,25 +183,27 @@ func ConstrastCompare(set CompareSet) (float64, image.Image) {
 				c := color.Gray16{uint16(0xffff * math.Abs(grayA-grayB))}
 				result.Set(x, y, c)
 			} else {
+				numMatches++
 				result.Set(x, y, color.Black)
 			}
 
 		}
 	}
 
-	fraction := float64(numFailed) / float64(w*h)
-	return fraction, result
+	fraction := float64(numMatches) / float64(w*h)
+	return fraction, numFailed, result
 }
 
-func QuadCompare(set CompareSet) (float64, image.Image, error) {
+func QuadCompare(set CompareSet) (float64, int, image.Image, error) {
 	bounds := set.ImageA.Bounds()
 	w, h := bounds.Max.X, bounds.Max.Y
 
 	if w%2 != 0 || h%2 != 0 {
-		err := errors.New(fmt.Sprintf("Quad comparison requires power of two resolution. Resolution: %d x %d\n", w, h))
-		return 0.0, nil, err
+		err := fmt.Errorf("quad comparison requires power of two resolution. resolution: %d x %d", w, h)
+		return 0.0, 0, nil, err
 	}
 
+	numMatches := 0
 	numFailed := 0
 	result := image.NewNRGBA(bounds)
 
@@ -246,6 +242,7 @@ func QuadCompare(set CompareSet) (float64, image.Image, error) {
 				result.Set(x, y+1, c)
 				result.Set(x+1, y+1, c)
 			} else {
+				numMatches++
 				result.Set(x, y, color.Black)
 				result.Set(x+1, y, color.Black)
 				result.Set(x, y+1, color.Black)
@@ -255,6 +252,6 @@ func QuadCompare(set CompareSet) (float64, image.Image, error) {
 		}
 	}
 
-	fraction := float64(numFailed) / float64(w*h/4)
-	return fraction, result, nil
+	fraction := float64(numMatches) / float64(w*h/4)
+	return fraction, numFailed, result, nil
 }

@@ -1,4 +1,4 @@
-module ic/compare
+module ic/filter
 
 go 1.21.0
 
