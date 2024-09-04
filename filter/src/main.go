@@ -12,8 +12,8 @@ import (
 )
 
 var (
-	comparison = flag.String("c", "all", "Optional: Comparison options, [pixel,contrast,quad].")
-	fraction   = flag.Float64("f", 1.0, "Optional: Fraction threshold.")
+	comparison = flag.String("c", "all", "Optional: Comparison options, [pixel,contrast,quad,ssim,mse].")
+	index      = flag.Float64("i", 1.0, "Optional: Index threshold.")
 	numFailed  = flag.Int("n", 0, "Optional: Num failed points.")
 	directory  = flag.String("d", "", "Optional: Path to directory to filter.")
 )
@@ -28,19 +28,19 @@ func findMetaFiles(dirs []string) []shared.ResultData {
 			}
 
 			if !info.IsDir() && filepath.Base(path) == "meta.json" {
-				var result shared.ResultData
+				var r []shared.ResultData
 
 				data, err := os.ReadFile(path)
 				if err != nil {
 					return fmt.Errorf("error reading file: %v", err)
 				}
 
-				err = json.Unmarshal(data, &result)
+				err = json.Unmarshal(data, &r)
 				if err != nil {
 					return fmt.Errorf("error unmarshalling json: %v", err)
 				}
 
-				results = append(results, result)
+				results = append(results, r...)
 			}
 
 			return nil
@@ -72,11 +72,14 @@ func filterResults(results []shared.ResultData) []shared.ResultData {
 			continue
 		}
 
-		if r.Fraction < *fraction {
+		if r.Index > *index {
 			continue
 		}
-		if r.NumFailed > *numFailed {
-			continue
+
+		if *numFailed != 0 {
+			if r.NumFailed > *numFailed || r.NumFailed == -1 {
+				continue
+			}
 		}
 
 		filtered = append(filtered, r)
