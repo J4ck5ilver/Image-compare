@@ -3,8 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"ic/compare/src/utils"
 	"ic/shared"
-	"image"
 	"log"
 	"os"
 	"path/filepath"
@@ -15,29 +15,29 @@ type Pair struct {
 	a, b interface{}
 }
 
-func validateArgs(args []string) (CompareData, error) {
+func validateArgs(args []string) (utils.CompareData, error) {
 	fs := flag.NewFlagSet("image-compare", flag.ContinueOnError)
 
 	pathA := fs.String("A", "", "Filepath/directory A.")
 	pathB := fs.String("B", "", "Filepath/directory B.")
-	c := fs.String("c", "all", "Optional: Comparison options, [pixel,contrast,quad].")
+	c := fs.String("c", "all", "Optional: Comparison options, [pixel,contrast,quad,ssim,mse].")
 	o := fs.String("o", "", "Optional: output directory.")
 
 	if err := fs.Parse(args); err != nil {
-		return CompareData{}, err
+		return utils.CompareData{}, err
 	}
 
 	infoA, errA := os.Stat(*pathA)
 	infoB, errB := os.Stat(*pathB)
 	if errA != nil || errB != nil {
-		return CompareData{}, fmt.Errorf("no sources provided")
+		return utils.CompareData{}, fmt.Errorf("no sources provided")
 	}
 
 	if (infoA.IsDir() && !infoB.IsDir()) || (!infoA.IsDir() && infoB.IsDir()) {
-		return CompareData{}, fmt.Errorf("sources differ, comparing file to directory")
+		return utils.CompareData{}, fmt.Errorf("sources differ, comparing file to directory")
 	}
 
-	data := CompareData{}
+	data := utils.CompareData{}
 	data.SourceA = *pathA
 	data.SourceB = *pathB
 	data.IsDir = infoA.IsDir()
@@ -47,24 +47,9 @@ func validateArgs(args []string) (CompareData, error) {
 	return data, nil
 }
 
-func loadImage(path string) (image.Image, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	img, _, err := image.Decode(f)
-	if err != nil {
-		return nil, err
-	}
-
-	return img, nil
-}
-
-func load(data CompareData) ([]CompareSet, error) {
+func load(data utils.CompareData) ([]utils.CompareSet, error) {
 	pairs := []Pair{}
-	sets := []CompareSet{}
+	sets := []utils.CompareSet{}
 
 	orgExportDest := data.ExportDest
 
@@ -87,12 +72,12 @@ func load(data CompareData) ([]CompareSet, error) {
 	}
 
 	for _, p := range pairs {
-		imgA, err := loadImage(p.a.(string))
+		imgA, err := shared.LoadImage(p.a.(string))
 		if err != nil {
 			return sets, err
 		}
 
-		imgB, err := loadImage(p.b.(string))
+		imgB, err := shared.LoadImage(p.b.(string))
 		if err != nil {
 			return sets, err
 		}
@@ -110,7 +95,7 @@ func load(data CompareData) ([]CompareSet, error) {
 			data.ExportDest = dir
 		}
 
-		sets = append(sets, CompareSet{data, imgA, imgB})
+		sets = append(sets, utils.CompareSet{data, imgA, imgB})
 	}
 
 	return sets, nil
