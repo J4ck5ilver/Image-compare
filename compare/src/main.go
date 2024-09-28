@@ -95,13 +95,13 @@ func load(data utils.CompareData) ([]utils.CompareSet, error) {
 			data.ExportDest = dir
 		}
 
-		sets = append(sets, utils.CompareSet{data, imgA, imgB})
+		sets = append(sets, utils.CompareSet{Data: data, ImageA: imgA, ImageB: imgB})
 	}
 
 	return sets, nil
 }
 
-func run(args []string) []shared.ResultData {
+func run(args []string) []shared.Comparison {
 	compareData, err := validateArgs(args)
 	if err != nil {
 		log.Fatal(err)
@@ -116,22 +116,22 @@ func run(args []string) []shared.ResultData {
 		log.Fatal("Zero valid comparisons loaded")
 	}
 
-	results := []shared.ResultData{}
+	comparisons := []shared.Comparison{}
 	for _, s := range compareSets {
-		r, err := Compare(s)
+		c, err := Compare(s)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		results = append(results, r...)
+		comparisons = append(comparisons, c)
 	}
 
-	return results
+	return comparisons
 }
 
 func main() {
-	results := run(os.Args[1:])
-	for _, r := range results {
-		fmt.Println(r.Location)
+	comparisons := run(os.Args[1:])
+	for _, c := range comparisons {
+		fmt.Println(c.Location)
 	}
 }

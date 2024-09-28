@@ -28,22 +28,21 @@ func copy(src string, dst string) error {
 	return nil
 }
 
-func export(data utils.CompareData, images []image.Image, results []shared.ResultData) error {
-	_, err := os.Stat(data.ExportDest)
+func export(data utils.CompareData, images []image.Image, comparison shared.Comparison) error {
+	_, err := os.Stat(comparison.Location)
 	if err != nil {
 		return err
 	}
 
-	os.Mkdir(data.ExportDest, os.ModePerm)
+	os.Mkdir(comparison.Location, os.ModePerm)
 
-	for i, r := range results {
-		base := filepath.Base(data.SourceA)
-		ext := filepath.Ext(base)
-		filename := strings.TrimSuffix(base, ext)
+	copy(data.SourceA, filepath.Join(comparison.Location, filepath.Base(comparison.SourceA)))
+	copy(data.SourceB, filepath.Join(comparison.Location, filepath.Base(comparison.SourceB)))
 
-		filename += r.Comparison + "_diff.png"
+	for i, r := range comparison.Results {
+		filename := r.Comparison + ".png"
 
-		f, err := os.Create(filepath.Join(data.ExportDest, filename))
+		f, err := os.Create(filepath.Join(comparison.Location, filename))
 		if err != nil {
 			return err
 		}
@@ -54,16 +53,13 @@ func export(data utils.CompareData, images []image.Image, results []shared.Resul
 		}
 	}
 
-	copy(data.SourceA, filepath.Join(data.ExportDest, filepath.Base(data.SourceA)))
-	copy(data.SourceB, filepath.Join(data.ExportDest, filepath.Base(data.SourceB)))
-
-	jsonData, err := json.MarshalIndent(results, "", "  ")
+	jsonData, err := json.MarshalIndent(comparison, "", "  ")
 	if err != nil {
 		err = fmt.Errorf("error marshaling json: %v", err)
 		return err
 	}
 
-	err = os.WriteFile(filepath.Join(data.ExportDest, "meta.json"), jsonData, 0644)
+	err = os.WriteFile(filepath.Join(comparison.Location, "meta.json"), jsonData, 0644)
 	if err != nil {
 		err = fmt.Errorf("error writing to file: %v", err)
 		return err
@@ -72,9 +68,9 @@ func export(data utils.CompareData, images []image.Image, results []shared.Resul
 	return nil
 }
 
-func Compare(set utils.CompareSet) ([]shared.ResultData, error) {
+func Compare(set utils.CompareSet) (shared.Comparison, error) {
 	if len(set.Data.Comparisons) == 0 {
-		return []shared.ResultData{}, fmt.Errorf("no comparison type set.")
+		return shared.Comparison{}, fmt.Errorf("no comparison type set")
 	}
 
 	results := []shared.ResultData{}
@@ -89,25 +85,25 @@ func Compare(set utils.CompareSet) ([]shared.ResultData, error) {
 		switch c {
 		case shared.Pixel:
 			index, numFailed, img = algos.PixelCompare(set)
-			result = shared.ResultData{string(shared.Pixel), index, numFailed, set.Data.ExportDest}
+			result = shared.ResultData{Comparison: string(shared.Pixel), Index: index, NumFailed: numFailed}
 		case shared.Contrast:
 			index, numFailed, img = algos.ConstrastCompare(set)
-			result = shared.ResultData{string(shared.Contrast), index, numFailed, set.Data.ExportDest}
+			result = shared.ResultData{Comparison: string(shared.Contrast), Index: index, NumFailed: numFailed}
 		case shared.Quad:
 			index, numFailed, img, err = algos.QuadCompare(set)
 			if err != nil {
 				fmt.Println(err)
 				continue
 			}
-			result = shared.ResultData{string(shared.Quad), index, numFailed, set.Data.ExportDest}
+			result = shared.ResultData{Comparison: string(shared.Quad), Index: index, NumFailed: numFailed}
 		case shared.SSIM:
 			index, numFailed, img = algos.SSIM(set)
-			result = shared.ResultData{string(shared.SSIM), index, numFailed, set.Data.ExportDest}
+			result = shared.ResultData{Comparison: string(shared.SSIM), Index: index, NumFailed: numFailed}
 		case shared.MSE:
 			index, numFailed, img = algos.MSE(set)
-			result = shared.ResultData{string(shared.MSE), index, numFailed, set.Data.ExportDest}
+			result = shared.ResultData{Comparison: string(shared.MSE), Index: index, NumFailed: numFailed}
 		default:
-			return []shared.ResultData{}, fmt.Errorf("comparison type \"%v\" not supported", c)
+			return shared.Comparison{}, fmt.Errorf("comparison type \"%v\" not supported", c)
 		}
 
 		if debug {
@@ -117,11 +113,26 @@ func Compare(set utils.CompareSet) ([]shared.ResultData, error) {
 		images = append(images, img)
 	}
 
+	comparison := shared.Comparison{
+		Location: set.Data.ExportDest,
+		SourceA:  filepath.Base(set.Data.SourceA),
+		SourceB:  filepath.Base(set.Data.SourceB),
+		Results:  results,
+	}
+
+	if comparison.SourceA == comparison.SourceB {
+		ext := filepath.Ext(comparison.SourceA)
+		comparison.SourceA = strings.TrimSuffix(comparison.SourceA, ext) + "_A" + ext
+
+		ext = filepath.Ext(comparison.SourceB)
+		comparison.SourceB = strings.TrimSuffix(comparison.SourceB, ext) + "_B" + ext
+	}
+
 	if len(set.Data.ExportDest) > 0 {
-		if err := export(set.Data, images, results); err != nil {
-			return []shared.ResultData{}, err
+		if err := export(set.Data, images, comparison); err != nil {
+			return shared.Comparison{}, err
 		}
 	}
 
-	return results, nil
+	return comparison, nil
 }
