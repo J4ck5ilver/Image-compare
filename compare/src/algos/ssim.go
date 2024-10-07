@@ -20,11 +20,10 @@ func SSIM(set utils.CompareSet) (float64, int, image.Image) {
 
 	cov, pixels := utils.Covariance(gray1, gray2, mean1, mean2)
 
-	c1 := 6.5025
-	c2 := 58.5225
+	c1 := 0.01 * 0.01
+	c2 := 0.03 * 0.03
 
-	ssim := ((2*mean1*mean2 + c1) * (2*cov + c2)) /
-		((mean1*mean1 + mean2*mean2 + c1) * (variance1 + variance2 + c2))
+	ssim := ((2*mean1*mean2 + c1) * (2*cov + c2)) / ((mean1*mean1 + mean2*mean2 + c1) * (variance1 + variance2 + c2))
 
 	bounds := set.ImageA.Bounds()
 	w, h := bounds.Max.X, bounds.Max.Y
@@ -34,8 +33,7 @@ func SSIM(set utils.CompareSet) (float64, int, image.Image) {
 	i := 0
 	for y := 0; y < h; y++ {
 		for x := 0; x < w; x++ {
-			p := math.Abs(((2*mean1*mean2 + c1) * (2*pixels[i] + c2)) /
-				((mean1*mean1 + mean2*mean2 + c1) * (variance1 + variance2 + c2)))
+			p := pixels[i]
 			i++
 
 			result.Set(x, y, color.RGBA{uint8(p * 255), uint8(p * 255), uint8(p * 255), 255})

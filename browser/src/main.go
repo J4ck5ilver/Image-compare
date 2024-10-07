@@ -7,10 +7,14 @@ import (
 	"image/color"
 	"image/draw"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync"
 
 	"gioui.org/app"
+	"gioui.org/io/event"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/unit"
@@ -22,9 +26,19 @@ import (
 )
 
 type ClickableImage struct {
+	Label  string
 	Image  image.Image
 	Widget widget.Clickable
-	Label  string
+}
+
+type ImageSettings struct {
+	Label     string
+	Image     image.Image
+	BlendMode widget.Enum
+	Alpha     widget.Float
+	R         widget.Float
+	G         widget.Float
+	B         widget.Float
 }
 
 type C = layout.Context
@@ -33,14 +47,17 @@ type D = layout.Dimensions
 var imageMap = make(map[string]image.Image)
 
 var imageView draw.Image
-var imagesActive []image.Image
+var imagesActive []ImageSettings
 
 var imageBrowser []ClickableImage
 var imageBrowserList widget.List
+var imageSettingsList widget.List
 
 var comparisonList widget.List
 var comparisons []shared.Comparison
 var comparisonButtons []widget.Clickable
+
+var imageMutex = sync.Mutex{}
 
 var (
 	directory = flag.String("d", "", "Path to directory to load")
@@ -48,6 +65,11 @@ var (
 
 func setupDefaults() {
 	imageBrowserList = widget.List{
+		List: layout.List{
+			Axis: layout.Vertical,
+		},
+	}
+	imageSettingsList = widget.List{
 		List: layout.List{
 			Axis: layout.Vertical,
 		},
@@ -100,8 +122,29 @@ func drawApp(w *app.Window) error {
 		ContrastFg: color.NRGBA{R: 0xFF, G: 0xFF, B: 0xFF, A: 0xFF},
 	}
 
+	events := make(chan event.Event)
+	eventAck := make(chan struct{})
+
+	go func() {
+		for {
+			updateViewImage()
+		}
+	}()
+
+	go func() {
+		for {
+			ev := w.Event()
+			events <- ev
+			<-eventAck
+			if _, ok := ev.(app.DestroyEvent); ok {
+				return
+			}
+		}
+	}()
+
 	for {
-		switch e := w.Event().(type) {
+		e := <-events
+		switch e := e.(type) {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 
@@ -117,10 +160,10 @@ func drawApp(w *app.Window) error {
 			)
 
 			e.Frame(gtx.Ops)
-
 		case app.DestroyEvent:
 			return e.Err
 		}
+		eventAck <- struct{}{}
 	}
 }
 
@@ -165,14 +208,43 @@ func toolSidebar(gtx C, th *material.Theme) D {
 		Axis: layout.Vertical,
 	}.Layout(gtx,
 		layout.Rigid(func(gtx C) D {
-			utils.FillLayout(gtx, color.NRGBA{R: 0x08, G: 0x08, B: 0x08, A: 0xFF})
-			//ls := material.List(th, &testList)
+			ls := material.List(th, &imageSettingsList)
 
-			//return ls.Layout(gtx, 10, func(gtx C, index int) D {
-			//	lbl := material.Body1(th, "item")
-			//	return lbl.Layout(gtx)
-			//})
-			return D{}
+			return ls.Layout(gtx, len(imagesActive), func(gtx C, index int) D {
+				return layout.Flex{
+					Axis: layout.Vertical,
+				}.Layout(gtx,
+					layout.Rigid(material.Body1(th, imagesActive[index].Label).Layout),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
+					layout.Rigid(material.RadioButton(th, &imagesActive[index].BlendMode, "Alpha", "Alpha").Layout),
+					layout.Rigid(material.RadioButton(th, &imagesActive[index].BlendMode, "Lighten", "Lighten").Layout),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
+					layout.Rigid(func(gtx C) D {
+						if imagesActive[index].BlendMode.Value == utils.Blend_Alpha {
+							l := material.Body2(th, "Alpha: "+strconv.FormatFloat(float64(imagesActive[index].Alpha.Value), 'f', 2, 64))
+							return l.Layout(gtx)
+						}
+						return D{}
+					}),
+					layout.Rigid(func(gtx C) D {
+						if imagesActive[index].BlendMode.Value == utils.Blend_Alpha {
+							l := material.Slider(th, &imagesActive[index].Alpha)
+							return l.Layout(gtx)
+						}
+						return D{}
+					}),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
+					layout.Rigid(material.Body2(th, "Red: "+strconv.FormatFloat(float64(imagesActive[index].R.Value), 'f', 2, 64)).Layout),
+					layout.Rigid(material.Slider(th, &imagesActive[index].R).Layout),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
+					layout.Rigid(material.Body2(th, "Green: "+strconv.FormatFloat(float64(imagesActive[index].G.Value), 'f', 2, 64)).Layout),
+					layout.Rigid(material.Slider(th, &imagesActive[index].G).Layout),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
+					layout.Rigid(material.Body2(th, "Blue: "+strconv.FormatFloat(float64(imagesActive[index].B.Value), 'f', 2, 64)).Layout),
+					layout.Rigid(material.Slider(th, &imagesActive[index].B).Layout),
+					layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
+				)
+			})
 		}),
 	)
 }
@@ -225,7 +297,7 @@ func pictureBrowser(gtx C, th *material.Theme) D {
 						gtx.Constraints.Max.Y = gtx.Dp(unit.Dp(100))
 						return imageBrowser[index].Widget.Layout(gtx, func(gtx C) D {
 							if imageBrowser[index].Widget.Pressed() {
-								updateViewImage(imageBrowser[index].Image)
+								appendViewImage(imageBrowser[index])
 							}
 							utils.FillLayout(gtx, color.NRGBA{R: 0x08, G: 0x08, B: 0x08, A: 0xFF})
 							return D{Size: utils.DrawImage(gtx, imageBrowser[index].Image)}
@@ -241,7 +313,7 @@ func pictureBrowser(gtx C, th *material.Theme) D {
 }
 
 func setComparison(comparison shared.Comparison) {
-	imagesActive = []image.Image{}
+	imagesActive = []ImageSettings{}
 	imageBrowser = []ClickableImage{}
 
 	filepaths := []string{
@@ -269,49 +341,80 @@ func setComparison(comparison shared.Comparison) {
 	}
 
 	if len(imageBrowser) != 0 {
-		updateViewImage(imageBrowser[0].Image)
+		appendViewImage(imageBrowser[0])
 	}
 
 }
-func updateViewImage(newImage image.Image) {
+func appendViewImage(newImage ClickableImage) {
 	imageFound := false
+	imageMutex.Lock()
 	for i, img := range imagesActive {
-		if img == newImage {
+		if img.Image == newImage.Image {
 			imagesActive = append(imagesActive[:i], imagesActive[i+1:]...)
 			imageFound = true
 		}
 	}
 
 	if !imageFound {
-		imagesActive = append(imagesActive, newImage)
+		imagesActive = append(imagesActive, ImageSettings{
+			Label:     newImage.Label,
+			Image:     newImage.Image,
+			BlendMode: widget.Enum{Value: utils.Blend_Alpha},
+			Alpha:     widget.Float{Value: 1.0},
+			R:         widget.Float{Value: 1.0},
+			G:         widget.Float{Value: 1.0},
+			B:         widget.Float{Value: 1.0},
+		})
 	}
 
-	imageView = nil
+	imageMutex.Unlock()
+}
+
+func updateViewImage() {
+	imageMutex.Lock()
 	if len(imagesActive) > 0 {
-		imageView = image.NewRGBA(imagesActive[0].Bounds())
+		imgCopy := imagesActive
+		imageMutex.Unlock()
+		iv := image.NewRGBA(imgCopy[0].Image.Bounds())
 
-		//alpha := 1.0
-		for _, img := range imagesActive {
-			for y := 0; y < img.Bounds().Dy(); y++ {
-				for x := 0; x < img.Bounds().Dx(); x++ {
-					overlayColor := img.At(x, y)
-					baseColor := imageView.At(x, y)
+		for _, img := range imgCopy {
+			for y := 0; y < img.Image.Bounds().Dy(); y++ {
+				for x := 0; x < img.Image.Bounds().Dx(); x++ {
+					overlayColor := img.Image.At(x, y)
+					baseColor := iv.At(x, y)
 
-					blendedColor := utils.BlendLighten(baseColor, overlayColor)
+					fr, fg, fb, _ := overlayColor.RGBA()
+					r := uint8(math.Round(float64(fr) / 65535.0 * float64(img.R.Value) * 255))
+					g := uint8(math.Round(float64(fg) / 65535.0 * float64(img.G.Value) * 255))
+					b := uint8(math.Round(float64(fb) / 65535.0 * float64(img.B.Value) * 255))
 
-					imageView.Set(x, y, blendedColor)
+					var blendedColor color.Color
+					if img.BlendMode.Value == utils.Blend_Alpha {
+						blendedColor = utils.BlendAlpha(baseColor, color.RGBA{r, g, b, 255}, float64(img.Alpha.Value))
+					} else {
+						blendedColor = utils.BlendLighten(baseColor, color.RGBA{r, g, b, 255})
+					}
+
+					iv.Set(x, y, blendedColor)
 				}
 			}
 		}
+
+		imageView = iv
+	} else {
+		imageMutex.Unlock()
 	}
 }
 
 func isActive(img image.Image) bool {
+	imageMutex.Lock()
 	for _, i := range imagesActive {
-		if i == img {
+		if i.Image == img {
+			imageMutex.Unlock()
 			return true
 		}
 	}
+	imageMutex.Unlock()
 
 	return false
 }

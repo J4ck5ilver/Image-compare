@@ -149,7 +149,7 @@ func TestSSIMDiff(t *testing.T) {
 }
 
 func TestMSEMatch(t *testing.T) {
-	args := []string{"-A", "../../testAssets/white.png", "-B", "../../testAssets/white.png", "-c", "ssim"}
+	args := []string{"-A", "../../testAssets/white.png", "-B", "../../testAssets/white.png", "-c", "mse"}
 
 	comparisons := run(args)
 
@@ -167,7 +167,7 @@ func TestMSEMatch(t *testing.T) {
 }
 
 func TestMSEDiff(t *testing.T) {
-	args := []string{"-A", "../../testAssets/white.png", "-B", "../../testAssets/black.png", "-c", "ssim"}
+	args := []string{"-A", "../../testAssets/white.png", "-B", "../../testAssets/black.png", "-c", "mse"}
 
 	comparisons := run(args)
 
@@ -221,8 +221,8 @@ func TestAll(t *testing.T) {
 		t.Errorf("Quad compare test failed, compare value was %v, expected value 2908", comparisons[0].Results[2].NumFailed)
 	}
 
-	if comparisons[0].Results[3].Index != 0.982134444334117 {
-		t.Errorf("SSIM compare test failed, compare value was %v, expected value 0.982134444334117", comparisons[0].Results[3].Index)
+	if comparisons[0].Results[3].Index != 0.9815413379210115 {
+		t.Errorf("SSIM compare test failed, compare value was %v, expected value 0.9815413379210115", comparisons[0].Results[3].Index)
 	}
 
 	if comparisons[0].Results[3].NumFailed != -1 {

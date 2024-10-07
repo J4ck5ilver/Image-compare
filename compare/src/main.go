@@ -20,8 +20,8 @@ func validateArgs(args []string) (utils.CompareData, error) {
 
 	pathA := fs.String("A", "", "Filepath/directory A.")
 	pathB := fs.String("B", "", "Filepath/directory B.")
-	c := fs.String("c", "all", "Optional: Comparison options, [pixel,contrast,quad,ssim,mse].")
 	o := fs.String("o", "", "Optional: output directory.")
+	c := fs.String("c", "all", "Optional: Comparison options, [pixel,contrast,quad,ssim,mse].")
 
 	if err := fs.Parse(args); err != nil {
 		return utils.CompareData{}, err
@@ -132,6 +132,10 @@ func run(args []string) []shared.Comparison {
 func main() {
 	comparisons := run(os.Args[1:])
 	for _, c := range comparisons {
-		fmt.Println(c.Location)
+		if len(c.Location) > 1 {
+			fmt.Println(c.Location)
+		} else {
+			fmt.Println(c.Results)
+		}
 	}
 }
