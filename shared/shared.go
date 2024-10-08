@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"golang.org/x/image/draw"
 )
 
 type ComparisonType string
@@ -58,8 +60,15 @@ func GetComparisons(compString string) []ComparisonType {
 
 	return comparisons
 }
-
 func LoadImage(path string) (image.Image, error) {
+	return loadImage(path, 1.0)
+}
+
+func LoadImageScaled(path string, scale float64) (image.Image, error) {
+	return loadImage(path, scale)
+}
+
+func loadImage(path string, scale float64) (image.Image, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -71,7 +80,23 @@ func LoadImage(path string) (image.Image, error) {
 		return nil, err
 	}
 
+	if scale != 1.0 {
+		img = scaleImage(img, scale)
+	}
+
 	return img, nil
+}
+
+func scaleImage(img image.Image, scale float64) image.Image {
+	bounds := img.Bounds()
+	w := float64(bounds.Max.X) * scale
+	h := float64(bounds.Max.Y) * scale
+
+	dst := image.NewRGBA(image.Rect(0, 0, int(w), int(h)))
+
+	draw.NearestNeighbor.Scale(dst, dst.Bounds(), img, img.Bounds(), draw.Over, nil)
+
+	return dst
 }
 
 func FindMetaFiles(dir string) []Comparison {

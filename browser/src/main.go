@@ -59,8 +59,11 @@ var comparisonButtons []widget.Clickable
 
 var imageMutex = sync.Mutex{}
 
+var subProcessingImages [10]image.Image
+
 var (
 	directory = flag.String("d", "", "Path to directory to load")
+	scale     = flag.String("s", "1.0", "Scale, helps with performance")
 )
 
 func setupDefaults() {
@@ -124,9 +127,11 @@ func drawApp(w *app.Window) error {
 
 	events := make(chan event.Event)
 	eventAck := make(chan struct{})
+	render := make(chan struct{})
 
 	go func() {
 		for {
+			<-render
 			updateViewImage()
 		}
 	}()
@@ -147,6 +152,13 @@ func drawApp(w *app.Window) error {
 		switch e := e.(type) {
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
+
+			for _, ia := range imagesActive {
+				_, hovered := ia.BlendMode.Hovered()
+				if ia.Alpha.Dragging() || ia.R.Dragging() || ia.G.Dragging() || ia.B.Dragging() || hovered {
+					render <- struct{}{}
+				}
+			}
 
 			layout.Flex{
 				Axis: layout.Vertical,
@@ -218,6 +230,8 @@ func toolSidebar(gtx C, th *material.Theme) D {
 					layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
 					layout.Rigid(material.RadioButton(th, &imagesActive[index].BlendMode, "Alpha", "Alpha").Layout),
 					layout.Rigid(material.RadioButton(th, &imagesActive[index].BlendMode, "Lighten", "Lighten").Layout),
+					layout.Rigid(material.RadioButton(th, &imagesActive[index].BlendMode, "Darken", "Darken").Layout),
+					layout.Rigid(material.RadioButton(th, &imagesActive[index].BlendMode, "Difference", "Difference").Layout),
 					layout.Rigid(layout.Spacer{Height: unit.Dp(15)}.Layout),
 					layout.Rigid(func(gtx C) D {
 						if imagesActive[index].BlendMode.Value == utils.Blend_Alpha {
@@ -326,7 +340,8 @@ func setComparison(comparison shared.Comparison) {
 
 	for _, p := range filepaths {
 		if _, exists := imageMap[p]; !exists {
-			img, err := shared.LoadImage(p)
+			s, _ := strconv.ParseFloat(*scale, 64)
+			img, err := shared.LoadImageScaled(p, s)
 
 			if err == nil {
 				imageMap[p] = img
@@ -368,6 +383,8 @@ func appendViewImage(newImage ClickableImage) {
 	}
 
 	imageMutex.Unlock()
+
+	updateViewImage()
 }
 
 func updateViewImage() {
@@ -375,29 +392,66 @@ func updateViewImage() {
 	if len(imagesActive) > 0 {
 		imgCopy := imagesActive
 		imageMutex.Unlock()
-		iv := image.NewRGBA(imgCopy[0].Image.Bounds())
+
+		bounds := imgCopy[0].Image.Bounds()
+		iv := image.NewRGBA(bounds)
+
+		numSections := len(subProcessingImages)
+
+		sectionHeight := bounds.Max.Y / numSections
 
 		for _, img := range imgCopy {
-			for y := 0; y < img.Image.Bounds().Dy(); y++ {
-				for x := 0; x < img.Image.Bounds().Dx(); x++ {
-					overlayColor := img.Image.At(x, y)
-					baseColor := iv.At(x, y)
+			var waitGroup sync.WaitGroup
 
-					fr, fg, fb, _ := overlayColor.RGBA()
-					r := uint8(math.Round(float64(fr) / 65535.0 * float64(img.R.Value) * 255))
-					g := uint8(math.Round(float64(fg) / 65535.0 * float64(img.G.Value) * 255))
-					b := uint8(math.Round(float64(fb) / 65535.0 * float64(img.B.Value) * 255))
+			for i := 0; i < numSections; i++ {
+				waitGroup.Add(1)
 
-					var blendedColor color.Color
-					if img.BlendMode.Value == utils.Blend_Alpha {
-						blendedColor = utils.BlendAlpha(baseColor, color.RGBA{r, g, b, 255}, float64(img.Alpha.Value))
-					} else {
-						blendedColor = utils.BlendLighten(baseColor, color.RGBA{r, g, b, 255})
+				go func(j int) {
+					defer waitGroup.Done()
+
+					start := j * sectionHeight
+					end := (j + 1) * sectionHeight
+					if j == numSections-1 {
+						end = bounds.Max.Y
 					}
 
-					iv.Set(x, y, blendedColor)
-				}
+					switch img.Image.(type) {
+					case *image.NRGBA:
+						subProcessingImages[j] = img.Image.(*image.NRGBA).SubImage(image.Rect(0, start, bounds.Max.X, end))
+					case *image.RGBA:
+						subProcessingImages[j] = img.Image.(*image.RGBA).SubImage(image.Rect(0, start, bounds.Max.X, end))
+					}
+
+					var overlayColor color.Color
+					var baseColor color.Color
+					var blendedColor color.Color
+					for y := start; y < end; y++ {
+						for x := 0; x < bounds.Max.X; x++ {
+							overlayColor = subProcessingImages[j].At(x, y)
+							baseColor = iv.At(x, y)
+
+							fr, fg, fb, _ := overlayColor.RGBA()
+							r := uint8(math.Round(float64(fr) / 65535.0 * float64(img.R.Value) * 255))
+							g := uint8(math.Round(float64(fg) / 65535.0 * float64(img.G.Value) * 255))
+							b := uint8(math.Round(float64(fb) / 65535.0 * float64(img.B.Value) * 255))
+
+							if img.BlendMode.Value == utils.Blend_Alpha {
+								blendedColor = utils.BlendAlpha(&baseColor, color.RGBA{r, g, b, 255}, float64(img.Alpha.Value))
+							} else if img.BlendMode.Value == utils.Blend_Lighten {
+								blendedColor = utils.BlendLighten(&baseColor, color.RGBA{r, g, b, 255})
+							} else if img.BlendMode.Value == utils.Blend_Darken {
+								blendedColor = utils.BlendDarken(&baseColor, color.RGBA{r, g, b, 255})
+							} else {
+								blendedColor = utils.BlendDifference(&baseColor, color.RGBA{r, g, b, 255})
+							}
+
+							iv.Set(x, y, blendedColor)
+						}
+					}
+				}(i)
 			}
+
+			waitGroup.Wait()
 		}
 
 		imageView = iv
