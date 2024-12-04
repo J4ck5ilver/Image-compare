@@ -17,8 +17,7 @@ jobs:
     - name: Install dependencies
       run: |
         sudo apt update
-        sudo apt install pkg-config libxkbcommon-dev libwayland-client0-dev
-
+        sudo apt install pkg-config libxkbcommon-dev libwayland-dev
 
     - name: Set up Go
       uses: actions/setup-go@v4
