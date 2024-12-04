@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    name: Build and Package Executables
+    name: Create GitHub Release
     runs-on: ubuntu-latest
 
     steps:
@@ -39,15 +39,6 @@ jobs:
       with:
         name: build-artifacts
         path: build/*.zip 
-
-  release:
-    name: Create GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
 
     - name: Create a GitHub release
       uses: ncipollo/release-action@v1
