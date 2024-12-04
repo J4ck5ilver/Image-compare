@@ -34,7 +34,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: build-artifacts
-        path: build/*.zip 
+        path: build/**/*.zip 
 
   release:
     name: Create GitHub Release
@@ -48,6 +48,6 @@ jobs:
     - name: Create a GitHub release
       uses: ncipollo/release-action@v1
       with:
-        artifacts: "build/*.zip"
+        artifacts: "build/**/*.zip"
         tag: ${{ github.ref_name }}
         token: ${{ secrets.GITHUB_TOKEN }}
