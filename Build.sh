@@ -31,7 +31,9 @@ for TARGET in "${TARGETS[@]}"; do
 done
 
 cd $OUTPUT_DIR
-for folder in *; do
-    zip "${folder}.zip" "$folder"
+for folder in */; do
+    if [ "$(ls -A $folder)" ]; then
+        zip -r "${folder%/}.zip" "$folder"
+    fi
 done
-cd -
+cd ..
