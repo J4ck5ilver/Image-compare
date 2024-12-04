@@ -14,6 +14,12 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
 
+    - name: Install dependencies
+      run: |
+        sudo apt update
+        sudo apt install pkg-config libxkbcommon-dev libwayland-client0-dev
+
+
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
