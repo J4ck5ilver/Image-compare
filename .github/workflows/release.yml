@@ -1,0 +1,48 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build and Package Executables
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: 1.21
+
+    - name: Make the build script executable
+      run: chmod +x ./build.sh
+
+    - name: Run build script
+      run: ./build.sh
+
+    - name: Upload artifacts for release
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-artifacts
+        path: build/*.zip 
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Create a GitHub release
+      uses: ncipollo/release-action@v1
+      with:
+        artifacts: "build/*.zip"
+        tag: ${{ github.ref_name }}
+        token: ${{ secrets.GITHUB_TOKEN }}
