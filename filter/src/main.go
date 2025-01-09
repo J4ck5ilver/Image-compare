@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"ic/shared"
 )
 
@@ -50,13 +51,20 @@ func filterComparisons(comparisons []shared.Comparison) []shared.Comparison {
 	return filtered
 }
 
-func main() {
-	flag.Parse()
-	comparisons := shared.FindMetaFiles(*directory)
 
-	comparisons = filterComparisons(comparisons)
+func main() {
+    flag.Parse()
+
+    comparisons := shared.FindMetaFiles(*directory)
+    comparisons = filterComparisons(comparisons)
 
 	for _, c := range comparisons {
-		fmt.Println(c.Location)
-	}
+        fmt.Println(c.Location)
+    }
+
+    if len(comparisons) > 0 {
+        os.Exit(1)
+    } else {
+        os.Exit(0)
+    }
 }
