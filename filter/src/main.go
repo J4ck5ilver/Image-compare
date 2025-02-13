@@ -62,9 +62,5 @@ func main() {
         fmt.Println(c.Location)
     }
 
-    if len(comparisons) > 0 {
-        os.Exit(1)
-    } else {
-        os.Exit(0)
-    }
+    os.Exit(0)
 }

@@ -91,36 +91,58 @@ func handleFileComparison(data utils.CompareData) ([]utils.CompareSet, error) {
     return sets, nil
 }
 
-func handleDirectoryComparison(data utils.CompareData) ([]utils.CompareSet, error) {
-    pairs := []Pair{}
-    subdirsA, err := os.ReadDir(data.SourceA)
+func walkSubdirectories(dirA, dirB, outDir string, allPairs *[]Pair) error {
+    thesePairs := compareFilesInDirectories(dirA, dirB, outDir)
+    *allPairs = append(*allPairs, thesePairs...)
+
+    subdirsA, err := os.ReadDir(dirA)
     if err != nil {
-        return nil, err
+        return err
     }
-    subdirsB, err := os.ReadDir(data.SourceB)
+    subdirsB, err := os.ReadDir(dirB)
     if err != nil {
-        return nil, err
+        return err
     }
 
-    subdirsBMap := mapSubdirectories(subdirsB, data.SourceB)
+    subdirsBMap := mapSubdirectories(subdirsB, dirB)
 
-    for _, dirA := range subdirsA {
-        if dirA.IsDir() {
-            matchingDirB, exists := subdirsBMap[dirA.Name()]
-            if exists {
-                newPairs := compareFilesInDirectories(filepath.Join(data.SourceA, dirA.Name()), matchingDirB, filepath.Join(data.ExportDest, dirA.Name()))
-                pairs = append(pairs, newPairs...)
+    for _, entryA := range subdirsA {
+        if entryA.IsDir() {
+            if matchingDirB, exists := subdirsBMap[entryA.Name()]; exists {
+                subOutDir := filepath.Join(outDir, entryA.Name())
+
+                if len(subOutDir) > 0 {
+                    if err := os.MkdirAll(subOutDir, os.ModePerm); err != nil {
+                        return err
+                    }
+                }
+
+                err := walkSubdirectories(
+                    filepath.Join(dirA, entryA.Name()),
+                    matchingDirB,
+                    subOutDir,
+                    allPairs,
+                )
+                if err != nil {
+                    return err
+                }
             }
         }
     }
 
-    if len(pairs) == 0 {
-        newPairs := compareFilesInDirectories(data.SourceA, data.SourceB, data.ExportDest)
-        pairs = append(pairs, newPairs...)
-    }
+    return nil
+}
+
+func handleDirectoryComparison(data utils.CompareData) ([]utils.CompareSet, error) {
+    pairs := []Pair{}
 
     if len(data.ExportDest) > 0 {
         os.MkdirAll(data.ExportDest, os.ModePerm)
+    }
+
+    err := walkSubdirectories(data.SourceA, data.SourceB, data.ExportDest, &pairs)
+    if err != nil {
+        return nil, err
     }
 
     return loadPairsIntoSets(pairs, data)
