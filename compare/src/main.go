@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
     "strings"
+    "sync"
 )
 
 type Pair struct {
@@ -22,6 +23,7 @@ func validateArgs(args []string) (utils.CompareData, error) {
 	pathB := fs.String("B", "", "Filepath/directory B.")
 	o := fs.String("o", "", "Optional: output directory.")
 	c := fs.String("c", "all", "Optional: Comparison options, [pixel,contrast,quad,ssim,mse].")
+    t := fs.Int("t", 1, "Number of threads to use.")
 
 	if err := fs.Parse(args); err != nil {
 		return utils.CompareData{}, err
@@ -43,6 +45,7 @@ func validateArgs(args []string) (utils.CompareData, error) {
 	data.IsDir = infoA.IsDir()
 	data.ExportDest = *o
 	data.Comparisons = shared.GetComparisons(*c)
+    data.Threads = *t
 
 	return data, nil
 }
@@ -71,24 +74,19 @@ func handleFileComparison(data utils.CompareData) ([]utils.CompareSet, error) {
 
     sets := []utils.CompareSet{}
     for _, p := range pairs {
-        imgA, err := shared.LoadImage(p.a.(string))
-        if err != nil {
-            return nil, err
-        }
-
-        imgB, err := shared.LoadImage(p.b.(string))
-        if err != nil {
-            return nil, err
-        }
-
-        data.SourceA = p.a.(string)
-        data.SourceB = p.b.(string)
-        data.ExportDest = orgExportDest
-
-        sets = append(sets, utils.CompareSet{Data: data, ImageA: imgA, ImageB: imgB})
+        localData := data
+        localData.SourceA = p.a.(string)
+        localData.SourceB = p.b.(string)
+        localData.ExportDest = orgExportDest
+    
+        sets = append(sets, utils.CompareSet{
+            Data:       localData,
+            ImageAPath: p.a.(string),
+            ImageBPath: p.b.(string),
+        })
     }
-
     return sets, nil
+    
 }
 
 func walkSubdirectories(dirA, dirB, outDir string, allPairs *[]Pair) error {
@@ -206,12 +204,12 @@ func loadPairsIntoSets(pairs []Pair, data utils.CompareData) ([]utils.CompareSet
     }
 
     for _, p := range pairs {
-        imgA, err := shared.LoadImage(p.a.(string))
+        //imgA, err := shared.LoadImage(p.a.(string))
         if err != nil {
             return nil, fmt.Errorf("failed to load image %s: %v", p.a, err)
         }
 
-        imgB, err := shared.LoadImage(p.b.(string))
+        //imgB, err := shared.LoadImage(p.b.(string))
         if err != nil {
             return nil, fmt.Errorf("failed to load image %s: %v", p.b, err)
         }
@@ -241,10 +239,11 @@ func loadPairsIntoSets(pairs []Pair, data utils.CompareData) ([]utils.CompareSet
         localData.ExportDest = finalExportPath
 
         sets = append(sets, utils.CompareSet{
-            Data:   localData,
-            ImageA: imgA,
-            ImageB: imgB,
+            Data:       localData,
+            ImageAPath: p.a.(string),
+            ImageBPath: p.b.(string),
         })
+        
     }
 
     return sets, nil
@@ -254,31 +253,55 @@ func loadPairsIntoSets(pairs []Pair, data utils.CompareData) ([]utils.CompareSet
 
 
 func run(args []string) []shared.Comparison {
-	compareData, err := validateArgs(args)
-	if err != nil {
-		log.Fatal(err)
-	}
+    compareData, err := validateArgs(args)
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	compareSets, err := load(compareData)
-	if err != nil {
-		log.Fatal(err)
-	}
+    compareSets, err := load(compareData)
+    if err != nil {
+        log.Fatal(err)
+    }
 
-	if len(compareSets) == 0 {
-		log.Fatal("Zero valid comparisons loaded")
-	}
+    sem := make(chan struct{}, compareData.Threads)
 
-	comparisons := []shared.Comparison{}
-	for _, s := range compareSets {
-		c, err := Compare(s)
-		if err != nil {
-			log.Fatal(err)
-		}
+    comparisons := make([]shared.Comparison, len(compareSets))
 
-		comparisons = append(comparisons, c)
-	}
+    var wg sync.WaitGroup
 
-	return comparisons
+    for i, s := range compareSets {
+        wg.Add(1)
+        sem <- struct{}{}
+
+        go func(i int, s utils.CompareSet) {
+            defer wg.Done()
+            defer func() { <-sem }()
+
+            imgA, err := shared.LoadImage(s.ImageAPath)
+            if err != nil {
+                log.Fatal(err)
+            }
+            imgB, err := shared.LoadImage(s.ImageBPath)
+            if err != nil {
+                log.Fatal(err)
+            }
+
+            s.ImageA = imgA
+            s.ImageB = imgB
+
+            c, err := Compare(s)
+            if err != nil {
+                log.Fatal(err)
+            }
+
+            comparisons[i] = c
+
+        }(i, s)
+    }
+
+    wg.Wait()
+
+    return comparisons
 }
 
 func main() {
